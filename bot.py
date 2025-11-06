@@ -6,6 +6,7 @@ import datetime
 import time 
 import os # <--- FIXED: The os module must be imported to use os.getenv()
 from typing import Optional # Import Optional type hint
+import requests
 
 # Set up the bot with necessary intents and command prefix
 intents = discord.Intents.default()
@@ -165,6 +166,39 @@ async def break_timer(ctx, *, target: Optional[str] = None):
     else:
         await ctx.channel.send(f"{ctx.author.mention}, I couldn't find an active shield timer for {target_mention_str}.")
 
+bot.command(name='dog')
+async def dog_pic(ctx):
+    """Posts a random dog picture."""
+    try:
+        # Use The Dog API
+        response = requests.get('https://api.thedogapi.com/v1/images/search')
+        data = response.json()
+        
+        if response.status_code == 200 and data and 'url' in data[0]:
+            dog_url = data[0]['url']
+            await ctx.send(dog_url)
+        else:
+            await ctx.send("Sorry, couldn't fetch a dog picture right now! 🐕")
+    except requests.exceptions.RequestException:
+        await ctx.send("Oops! I had trouble connecting to the dog picture service.")
+
+# --- ADDED: New command for random cat images ---
+@bot.command(name='cat')
+async def cat_pic(ctx):
+    """Posts a random cat picture."""
+    try:
+        # Use The Cat API
+        response = requests.get('https://api.thecatapi.com/v1/images/search')
+        data = response.json()
+        
+        if response.status_code == 200 and data and 'url' in data[0]:
+            cat_url = data[0]['url']
+            await ctx.send(cat_url)
+        else:
+            await ctx.send("Sorry, couldn't fetch a cat picture right now! 🐈")
+    except requests.exceptions.RequestException:
+        await ctx.send("Oops! I had trouble connecting to the cat picture service.")
+
 
 @bot.event
 async def on_ready():
@@ -186,3 +220,4 @@ else:
         print("ERROR: Failed to log in. Check if your DISCORD_TOKEN is correct and has the 'Bot' scope.")
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
+
