@@ -13,6 +13,9 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix=['.shield ', '.'], intents=intents) # <-- Multi-prefix
 
+# Disable the default help command to use our custom one
+bot.remove_command('help')
+
 # Dictionary to store active timers
 # Format: {target_key: {"task": task_object, "duration": original_duration_str, "completion_timestamp": int, ...}}
 active_timers = {}
@@ -236,7 +239,7 @@ async def dog(ctx):
 async def cat(ctx):
     """Fetches a random cat picture."""
     try:
-        response = requests.get('https://api.thecatapi.com/v1/images/search')
+        response = requests.get('https.api.thecatapi.com/v1/images/search')
         response.raise_for_status()
         data = response.json()
         
@@ -264,6 +267,62 @@ async def raccoon(ctx):
     except requests.exceptions.RequestException as e:
         print(f"Error fetching raccoon pic: {e}")
         await ctx.channel.send("Sorry, the raccoon API seems to be down.")
+
+# --- NEW HELP COMMAND ---
+
+@bot.command(name='help')
+async def help(ctx):
+    """Displays this help message."""
+    
+    # Create the embed object
+    embed = discord.Embed(
+        title="Bot Help & Command List",
+        description="This bot responds to two prefixes: `.shield ` and `.`",
+        color=discord.Color.blue()
+    )
+    
+    # Add Timer Commands field
+    embed.add_field(
+        name="🛡️ Timer Commands (Prefix: `.shield ` or `.`)",
+        value=(
+            "**`.shield set <time> [target]`**\n"
+            "Sets a shield timer. *Target* can be a `@User` or a custom name (like `My Castle`). If no target, defaults to you.\n"
+            "*Example:* `.shield set 8h @MyFriend`\n"
+            "*Example:* `.set 3d Main Base`\n\n"
+            
+            "**`.shield break [target]`**\n"
+            "Cancels an active timer for you, a `@User`, or a custom name.\n"
+            "*Example:* `.break @MyFriend`\n\n"
+            
+            "**`.shield timers`**\n"
+            "Lists all active timers running on this server.\n"
+            "*Example:* `.timers`"
+        ),
+        inline=False
+    )
+    
+    # Add Fun Commands field
+    embed.add_field(
+        name="🐼 Fun Commands (Prefix: `.`)",
+        value=(
+            "**`.dog`**: Fetches a random dog picture.\n"
+            "**`.cat`**: Fetches a random cat picture.\n"
+            "**`.raccoon`**: Fetches a random raccoon picture.\n"
+        ),
+        inline=False
+    )
+    
+    # Add Help Command field
+    embed.add_field(
+        name="❓ Help",
+        value="**`.help`**: Shows this help message.",
+        inline=False
+    )
+    
+    embed.set_footer(text="Time format: 1d = 1 day, 1h = 1 hour, 1m = 1 minute")
+    
+    # Send the embed
+    await ctx.channel.send(embed=embed)
 
 
 # --- Bot Events ---
