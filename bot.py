@@ -169,4 +169,21 @@ async def break_timer(ctx, *, target: Optional[str] = None):
 async def on_ready():
     print(f'Logged in as {bot.user.name} (ID: {bot.user.id})')
 
-bot.run('OTIyNTc1NjY5NzM1NjA0MjQ1.Ge9uVw.kM7RRwqKGBW1pN8pEvTVnNbrpf4oQONcN8g6Qg')
+
+# --- START OF MODIFIED/ADDED SECTION ---
+# Get the token from the environment variable (securely)
+TOKEN = os.getenv("DISCORD_TOKEN") 
+
+if not TOKEN:
+    print("--------------------------------------------------------------------------------")
+    print("ERROR: The DISCORD_TOKEN environment variable is not set.")
+    print("Please set it in your environment (for local use) or in Railway's Variables tab.")
+    print("--------------------------------------------------------------------------------")
+else:
+    try:
+        bot.run(TOKEN)
+    except discord.errors.LoginFailure:
+        print("ERROR: Failed to log in. Check if your DISCORD_TOKEN is correct and has the 'Bot' scope.")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+# --- END OF MODIFIED/ADDED SECTION ---
