@@ -3,27 +3,28 @@ from discord.ext import commands
 import asyncio
 import re
 import datetime
-import time 
-from typing import Optional # Import Optional type hint
-import os # <-- Added for environment variable access
-import requests # <-- Added for .dog and .cat commands
+import time
+import os  # <-- Make sure this is imported
+import requests  # <-- Make sure this is imported
+from typing import Optional
 
-# Set up the bot with necessary intents and command prefix
-# CHANGE: command_prefix is now a list, allowing both ".shield " and "." to be recognized.
+# Set up the bot with necessary intents and multiple command prefixes
 intents = discord.Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix=['.shield ', '.'], intents=intents)
+bot = commands.Bot(command_prefix=['.shield ', '.'], intents=intents) # <-- Multi-prefix
 
-# Dictionary to store active timers: {user_id: {"task": task_object, ...} or {custom_name: {"task": task_object, ...}}
+# Dictionary to store active timers
+# Format: {target_key: {"task": task_object, "duration": original_duration_str, "completion_timestamp": int, ...}}
 active_timers = {}
 
 def parse_time(time_input):
     """Converts a string like '1d 2h 30m' or '1h1m' into seconds."""
     seconds = 0
+    # Updated regex to be more flexible, e.g., '1h30m'
     matches = re.findall(r'(\d+)\s*([dhm])', time_input.lower())
-    if not matches:
-        return None
-
+    if not matches and time_input.isdigit(): # Allow just seconds
+        return int(time_input)
+    
     for value, unit in matches:
         value = int(value)
         if unit == 'd':
@@ -32,136 +33,124 @@ def parse_time(time_input):
             seconds += value * 3600
         elif unit == 'm':
             seconds += value * 60
-    return seconds
+            
+    return seconds if seconds > 0 else None
 
 async def run_timer(target_key, total_seconds, original_duration_str, author_id, channel_id, is_custom_name):
     """The main timer logic with 1 hour and 15 minute conditional warnings."""
-    timer_start_time = time.time()
-    warning_sent_1hr = False
-    warning_sent_15min = False
-    
+    timer_data = active_timers.get(target_key)
+    if not timer_data: return
+
     channel = bot.get_channel(channel_id)
-    if not channel:
-        print(f"Error: Channel with ID {channel_id} not found.")
+    if not channel: # Channel might be deleted or bot lost access
+        if target_key in active_timers:
+            del active_timers[target_key]
         return
 
-    author = bot.get_user(author_id)
-    if not author:
-        author_mention = ""
-    else:
-        author_mention = author.mention
+    author_mention = f"<@{author_id}>"
+    target_mention_str = timer_data.get('target_mention_str', 'A timer target') # Fallback if error
 
-    target_mention_str = ""
-    if is_custom_name:
-        target_mention_str = target_key.split(':')[1]  # Get the custom name part
-    else:
-        target_user = bot.get_user(target_key)
-        target_mention_str = target_user.mention if target_user else "the target"
-
+    warning_1hr_time = 3600  # 60 * 60
+    warning_15min_time = 900 # 15 * 60
+    
     try:
-        while time.time() - timer_start_time < total_seconds:
-            
-            # Check for 1 hour warning
-            if total_seconds > 3600 and not warning_sent_1hr and (total_seconds - (time.time() - timer_start_time)) <= 3600:
-                await channel.send(
-                    f"**⏳ 1-Hour Warning!** The shield for {target_mention_str} (set by {author_mention}) will expire in **1 hour**."
-                )
-                warning_sent_1hr = True
+        current_sleep = total_seconds
 
-            # Check for 15 minute warning
-            if total_seconds > 900 and not warning_sent_15min and (total_seconds - (time.time() - timer_start_time)) <= 900:
-                await channel.send(
-                    f"**🔥 15-Minute Warning!** The shield for {target_mention_str} (set by {author_mention}) will expire in **15 minutes**. Get ready!"
-                )
-                warning_sent_15min = True
+        # 1 Hour Warning
+        if current_sleep > warning_1hr_time:
+            await asyncio.sleep(current_sleep - warning_1hr_time)
+            # Check if timer still exists before sending
+            if target_key not in active_timers:
+                return
+            await channel.send(
+                f"⏰ **1 hour remaining** for the shield for {target_mention_str} (set by {author_mention} for {original_duration_str})."
+            )
+            current_sleep = warning_1hr_time # Time remaining is now 1hr
 
-            await asyncio.sleep(60) # Sleep for 60 seconds
+        # 15 Minute Warning
+        if current_sleep > warning_15min_time:
+            await asyncio.sleep(current_sleep - warning_15min_time)
+            if target_key not in active_timers:
+                return
+            await channel.send(
+                f"⏰ **15 minutes remaining** for the shield for {target_mention_str} (set by {author_mention} for {original_duration_str})."
+            )
+            current_sleep = warning_15min_time # Time remaining is now 15m
         
-        # Timer completion
-        await channel.send(
-            f"**🛡️ SHIELD DOWN!** The **{original_duration_str}** shield for {target_mention_str} (set by {author_mention}) has expired! Attack now!"
-        )
+        # Final Reminder
+        await asyncio.sleep(current_sleep)
+
+        if target_key in active_timers:
+            await channel.send(
+                f"⏰ **Reminder finished!** The shield for {target_mention_str} (set by {author_mention}) is now over."
+            )
+            del active_timers[target_key]
 
     except asyncio.CancelledError:
-        # Task was cancelled (by the .break command)
-        pass 
-    finally:
-        # Clean up the active timer dictionary
+        # This is expected when a timer is manually broken
+        pass
+    except Exception as e:
+        print(f"Error in run_timer: {e}")
+        if channel:
+            await channel.send(f"An error occurred with a timer for {target_mention_str}. It has been removed.")
         if target_key in active_timers:
             del active_timers[target_key]
 
 
-# --- Bot Commands ---
-
 @bot.command(name='set')
-async def set_timer(ctx, duration: str, *, target: Optional[str] = None):
-    """
-    Sets a shield timer for a specified duration for yourself, a mentioned user, or a custom name.
-    Usage: .shield set <duration> [@user | custom name]
-    Example: .shield set 2h 30m @UserA
-    """
-    
-    total_seconds = parse_time(duration)
-    
-    if total_seconds is None or total_seconds <= 0:
-        await ctx.channel.send(
-            f"{ctx.author.mention}, please provide a valid duration (e.g., `3d 12h 5m`)."
-        )
+async def set_timer(ctx, time_input: str, *, target: Optional[str] = None):
+    """Starts or overwrites a timer. Use: .shield set <time> [@user or Custom Name]"""
+    seconds = parse_time(time_input)
+
+    if seconds is None or seconds <= 0:
+        await ctx.channel.send("Please provide a valid time format (e.g., `1d 2h 30m`, `10h`, `45m`).")
         return
 
-    if total_seconds > 604800: # Max 7 days
-        await ctx.channel.send(
-            f"{ctx.author.mention}, the maximum duration for a shield timer is 7 days."
-        )
-        return
-    
+    is_custom_name = False
     target_key = None
     target_mention_str = None
-    is_custom_name = False
 
     if target is None:
-        # Default to the author's own timer
+        # Default to the command author
         target_key = ctx.author.id
         target_mention_str = ctx.author.mention
     else:
-        # Check for mention first
+        # Check if the input is a user mention
         if ctx.message.mentions:
             mentioned_user = ctx.message.mentions[0]
             target_key = mentioned_user.id
             target_mention_str = mentioned_user.mention
         else:
             # It's a custom name
-            target_key = f"custom:{target.lower()}"
-            target_mention_str = f"**{target}**"
             is_custom_name = True
+            target_key = f"custom:{ctx.guild.id}:{target.lower()}" # Prefix to avoid ID collisions, scoped to guild
+            target_mention_str = f"**{target}**"
 
-    # If a timer is already active, cancel the old one before starting the new one
+    # Cancel any existing timer for this key/ID
     if target_key in active_timers:
         active_timers[target_key]['task'].cancel()
-        del active_timers[target_key]
+        await ctx.channel.send(f"⏰ {ctx.author.mention}, the previous shield timer for {target_mention_str} was overwritten.")
 
     # Calculate completion time
-    completion_time = datetime.datetime.now() + datetime.timedelta(seconds=total_seconds)
-    timestamp = int(completion_time.timestamp())
+    future_time = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=seconds)
+    timestamp = int(future_time.timestamp())
 
-    # Start the timer task
-    timer_task = bot.loop.create_task(
-        run_timer(target_key, total_seconds, duration, ctx.author.id, ctx.channel.id, is_custom_name)
-    )
+    # Store necessary data in the dictionary
+    task = asyncio.create_task(run_timer(target_key, seconds, time_input, ctx.author.id, ctx.channel.id, is_custom_name))
     
-    # Store the task object
     active_timers[target_key] = {
-        'task': timer_task,
-        'channel_id': ctx.channel.id,
-        'author_id': ctx.author.id,
-        'target_mention_str': target_mention_str
+        "task": task,
+        "duration": time_input,
+        "completion_timestamp": timestamp,
+        "author_id": ctx.author.id,
+        "target_mention_str": target_mention_str,
+        "is_custom_name": is_custom_name
     }
 
-    # Confirmation message
+    # Confirmation Message
     confirmation_message = (
-        f"**✅ Shield Timer Set!**\n"
-        f"A **{duration}** shield has been set for {target_mention_str} by {ctx.author.mention}.\n"
-        f"It will be completed at: <t:{timestamp}:F>."
+        f"⏰ {ctx.author.mention} set a shield timer for {target_mention_str} for **{time_input}**."
+        f"\nIt will be completed at: <t:{timestamp}:F> (which is <t:{timestamp}:R>)."
     )
     await ctx.channel.send(confirmation_message)
 
@@ -185,7 +174,7 @@ async def break_timer(ctx, *, target: Optional[str] = None):
             target_mention_str = mentioned_user.mention
         else:
             # It's likely a custom name
-            target_key = f"custom:{target.lower()}"
+            target_key = f"custom:{ctx.guild.id}:{target.lower()}"
             target_mention_str = f"**{target}**"
 
 
@@ -195,96 +184,106 @@ async def break_timer(ctx, *, target: Optional[str] = None):
         # Confirmation that it stopped
         await ctx.channel.send(f"✅ {ctx.author.mention} cancelled the shield timer for {target_mention_str}.")
     else:
-        await ctx.channel.send(f"{ctx.author.mention}, there is no active shield timer for {target_mention_str}.")
+        await ctx.channel.send(f"{ctx.author.mention}, I couldn't find an active shield timer for {target_mention_str}.")
 
-@bot.command(name='check')
-async def check_timer(ctx, *, target: Optional[str] = None):
-    """Checks the status of the active timer for yourself, a mentioned user, or a custom name."""
-    
-    target_key = None
-    target_mention_str = None
-    
-    if target is None:
-        target_key = ctx.author.id
-        target_mention_str = ctx.author.mention
-    else:
-        if ctx.message.mentions:
-            mentioned_user = ctx.message.mentions[0]
-            target_key = mentioned_user.id
-            target_mention_str = mentioned_user.mention
-        else:
-            target_key = f"custom:{target.lower()}"
-            target_mention_str = f"**{target}**"
+@bot.command(name='timers')
+async def list_timers(ctx):
+    """Lists all active timers set in this guild."""
+    if not active_timers:
+        await ctx.channel.send("There are no active timers right now.")
+        return
 
-    if target_key in active_timers:
-        # The stored task object doesn't directly give the remaining time, 
-        # but the logic in run_timer only sends the final message after the full duration.
-        # For simplicity, we can only confirm it's active.
-        await ctx.channel.send(f"**🟢 Active!** The shield timer for {target_mention_str} is currently active and counting down.")
-    else:
-        await ctx.channel.send(f"**🔴 Inactive.** There is no active shield timer for {target_mention_str}.")
+    response_lines = ["**Current Active Timers:**"]
+    
+    # Filter timers for the current guild if they are custom-named
+    guild_timers = 0
+    for key, data in active_timers.items():
+        # Check if it's a user ID (int) or a custom name for this guild
+        if isinstance(key, int) or (isinstance(key, str) and key.startswith(f"custom:{ctx.guild.id}")):
+            guild_timers += 1
+            timestamp = data['completion_timestamp']
+            target_str = data['target_mention_str']
+            
+            # Format the line
+            line = f"- {target_str} (Set for {data['duration']}) finishes <t:{timestamp}:R>."
+            response_lines.append(line)
+
+    if guild_timers == 0:
+        await ctx.channel.send("There are no active timers for this server.")
+        return
+
+    await ctx.channel.send("\n".join(response_lines))
+
+# --- Animal Commands ---
 
 @bot.command(name='dog')
-async def dog_pic(ctx):
-    """Pulls a random dog image from the Dog API."""
+async def dog(ctx):
+    """Fetches a random dog picture."""
     try:
         response = requests.get('https://dog.ceo/api/breeds/image/random')
-        response.raise_for_status() # Raise an exception for bad status codes
+        response.raise_for_status() # Raise an error for bad responses (4xx or 5xx)
         data = response.json()
         
-        if data['status'] == 'success':
-            image_url = data['message']
-            await ctx.channel.send(f"A random dog picture for you, {ctx.author.mention}! 🐶\n{image_url}")
+        if data.get('status') == 'success':
+            await ctx.channel.send(data['message'])
         else:
             await ctx.channel.send("Sorry, I couldn't fetch a dog picture right now.")
     except requests.exceptions.RequestException as e:
-        print(f"Error fetching dog picture: {e}")
-        await ctx.channel.send("Sorry, I had trouble connecting to the image service.")
-
+        print(f"Error fetching dog pic: {e}")
+        await ctx.channel.send("Sorry, the dog API seems to be down.")
 
 @bot.command(name='cat')
-async def cat_pic(ctx):
-    """Pulls a random cat image from the Cat API."""
+async def cat(ctx):
+    """Fetches a random cat picture."""
     try:
-        # Note: TheCatAPI returns an array of objects
         response = requests.get('https://api.thecatapi.com/v1/images/search')
-        response.raise_for_status() # Raise an exception for bad status codes
+        response.raise_for_status()
         data = response.json()
         
-        if data and isinstance(data, list) and 'url' in data[0]:
-            image_url = data[0]['url']
-            await ctx.channel.send(f"A random cat picture for you, {ctx.author.mention}! 🐱\n{image_url}")
+        if data and data[0].get('url'):
+            await ctx.channel.send(data[0]['url'])
         else:
             await ctx.channel.send("Sorry, I couldn't fetch a cat picture right now.")
     except requests.exceptions.RequestException as e:
-        print(f"Error fetching cat picture: {e}")
-        await ctx.channel.send("Sorry, I had trouble connecting to the image service.")
+        print(f"Error fetching cat pic: {e}")
+        await ctx.channel.send("Sorry, the cat API seems to be down.")
 
 @bot.command(name='raccoon')
-async def raccoon_pic(ctx):
-    """Posts a random raccoon picture using the Random Stuff API."""
+async def raccoon(ctx):
+    """Fetches a random raccoon picture."""
     try:
-        # Using an API that returns a random animal, hoping for a raccoon!
-        response = requests.get('https://api.tinyfox.dev/img/animal/raccoon')
+        # Using a more general-purpose random image API that has raccoons
+        response = requests.get('https://some-random-api.com/animal/raccoon')
+        response.raise_for_status()
         data = response.json()
-        # The structure is simple: {"url": "..."}
-        if data and 'url' in data:
-            await ctx.send(data['url'])
+        
+        if data and data.get('image'):
+            await ctx.channel.send(data['image'])
         else:
-            await ctx.send("Could not fetch a raccoon image right now. 😔")
-    except Exception as e:
-        print(f"Raccoon command error: {e}")
-        await ctx.send("An error occurred while fetching the raccoon picture.")
+            await ctx.channel.send("Sorry, I couldn't fetch a raccoon picture right now.")
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching raccoon pic: {e}")
+        await ctx.channel.send("Sorry, the raccoon API seems to be down.")
 
+
+# --- Bot Events ---
 
 @bot.event
 async def on_ready():
-    print(f'Bot is ready and logged in as {bot.user}')
+    print(f'Logged in as {bot.user.name} (ID: {bot.user.id})')
+    print('Bot is ready and running.')
 
-# Safely get the token from the environment variable
+# Securely get the token and run the bot
 TOKEN = os.getenv("DISCORD_TOKEN")
-if TOKEN is None:
-    print("FATAL ERROR: DISCORD_TOKEN environment variable not set.")
-else:
-    bot.run(TOKEN)
 
+if not TOKEN:
+    print("CRITICAL: DISCORD_TOKEN environment variable not set.")
+    print("Please set the DISCORD_TOKEN in your Railway project variables.")
+else:
+    try:
+        bot.run(TOKEN)
+    except discord.errors.LoginFailure:
+        print("CRITICAL: Improper token passed.")
+        print("Please ensure your DISCORD_TOKEN is correct in Railway.")
+    except Exception as e:
+        print(f"CRITICAL: An error occurred while running the bot: {e}")
