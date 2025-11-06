@@ -4,6 +4,7 @@ import asyncio
 import re
 import datetime
 import time 
+import os
 from typing import Optional # Import Optional type hint
 
 # Set up the bot with necessary intents and command prefix
@@ -187,3 +188,4 @@ else:
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
 # --- END OF MODIFIED/ADDED SECTION ---
+
