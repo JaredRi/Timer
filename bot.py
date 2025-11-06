@@ -4,7 +4,7 @@ import asyncio
 import re
 import datetime
 import time 
-import os
+import os # <--- FIXED: The os module must be imported to use os.getenv()
 from typing import Optional # Import Optional type hint
 
 # Set up the bot with necessary intents and command prefix
@@ -171,7 +171,6 @@ async def on_ready():
     print(f'Logged in as {bot.user.name} (ID: {bot.user.id})')
 
 
-# --- START OF MODIFIED/ADDED SECTION ---
 # Get the token from the environment variable (securely)
 TOKEN = os.getenv("DISCORD_TOKEN") 
 
@@ -187,5 +186,3 @@ else:
         print("ERROR: Failed to log in. Check if your DISCORD_TOKEN is correct and has the 'Bot' scope.")
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
-# --- END OF MODIFIED/ADDED SECTION ---
-
