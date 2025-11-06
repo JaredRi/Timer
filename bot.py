@@ -260,6 +260,22 @@ async def cat_pic(ctx):
         print(f"Error fetching cat picture: {e}")
         await ctx.channel.send("Sorry, I had trouble connecting to the image service.")
 
+@bot.command(name='raccoon')
+async def raccoon_pic(ctx):
+    """Posts a random raccoon picture using the Random Stuff API."""
+    try:
+        # Using an API that returns a random animal, hoping for a raccoon!
+        response = requests.get('https://api.tinyfox.dev/img/animal/raccoon')
+        data = response.json()
+        # The structure is simple: {"url": "..."}
+        if data and 'url' in data:
+            await ctx.send(data['url'])
+        else:
+            await ctx.send("Could not fetch a raccoon image right now. 😔")
+    except Exception as e:
+        print(f"Raccoon command error: {e}")
+        await ctx.send("An error occurred while fetching the raccoon picture.")
+
 
 @bot.event
 async def on_ready():
@@ -271,3 +287,4 @@ if TOKEN is None:
     print("FATAL ERROR: DISCORD_TOKEN environment variable not set.")
 else:
     bot.run(TOKEN)
+
