@@ -9,9 +9,10 @@ import os # <-- Added for environment variable access
 import requests # <-- Added for .dog and .cat commands
 
 # Set up the bot with necessary intents and command prefix
+# CHANGE: command_prefix is now a list, allowing both ".shield " and "." to be recognized.
 intents = discord.Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix='.shield ', intents=intents)
+bot = commands.Bot(command_prefix=['.shield ', '.'], intents=intents)
 
 # Dictionary to store active timers: {user_id: {"task": task_object, ...} or {custom_name: {"task": task_object, ...}}
 active_timers = {}
